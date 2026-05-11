@@ -1,0 +1,619 @@
+# Lab 2: Azure Pipelines 基礎
+
+## 🎯 目的
+このLabでは、Azure Pipelines の基礎を学び、YAML パイプライン、キャッシュ、Branch Policy、デバッグ方法を習得します。
+
+## ⏱️ 所要時間
+約75分
+
+## 📋 前提条件
+- Lab 0 の環境準備が完了していること
+- Azure DevOps プロジェクト
+- .NET SDK がインストールされていること
+
+## 🎓 学習内容
+
+### 重要ポイント（試験頻出）
+✅ **Cache vs Artifacts の違い**
+- **Cache タスク**: 依存関係（npm、NuGet、pip など）のキャッシュに使用
+- **Pipeline Artifacts**: ビルド成果物の保存・共有に使用
+
+✅ **System.Debug 変数**
+- `System.Debug = true` で詳細ログを有効化
+- パイプラインのトラブルシューティングに必須
+
+✅ **YAML テンプレート**
+- `extends` でテンプレートを継承
+- コードの再利用とメンテナンス性向上
+
+## 📝 演習内容
+
+### Exercise 1: サンプルアプリケーションの準備
+
+#### 1.1 リポジトリの作成
+
+```powershell
+# 新しいディレクトリを作成
+Set-Location ~\Documents
+New-Item -ItemType Directory -Name az400-lab2-pipeline
+Set-Location az400-lab2-pipeline
+
+# Git リポジトリを初期化
+git init
+git branch -M main
+```
+
+#### 1.2 .NET Web API プロジェクトの作成
+
+```powershell
+# .NET Web API プロジェクトを作成
+dotnet new webapi -n WebApp
+Set-Location WebApp
+
+# テストプロジェクトを作成
+dotnet new xunit -n WebApp.Tests
+dotnet add WebApp.Tests\WebApp.Tests.csproj reference WebApp\WebApp.csproj
+
+# ソリューションファイルを作成
+Set-Location ..
+dotnet new sln -n WebApp
+dotnet sln add WebApp\WebApp.csproj
+dotnet sln add WebApp.Tests\WebApp.Tests.csproj
+
+# ビルドして確認
+dotnet build
+dotnet test
+```
+
+#### 1.3 Azure Repos にプッシュ
+
+1. Azure DevOps → Repos → Files にアクセス
+2. リポジトリ名: `az400-lab2-pipeline`
+3. 「Clone」をクリックして URL をコピー
+
+```powershell
+# リモートリポジトリを追加
+git remote add origin https://dev.azure.com/your-org/AZ400-HandsOn/_git/az400-lab2-pipeline
+
+# ファイルをコミット
+git add .
+git commit -m "Initial commit: .NET Web API"
+git push -u origin main
+```
+
+### Exercise 2: 基本的な YAML パイプラインの作成
+
+#### 2.1 azure-pipelines.yml の作成
+
+プロジェクトルートに `azure-pipelines.yml` を作成：
+
+```yaml
+# azure-pipelines.yml
+trigger:
+  branches:
+    include:
+    - main
+    - develop
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  buildConfiguration: 'Release'
+
+stages:
+- stage: Build
+  displayName: 'Build Stage'
+  jobs:
+  - job: BuildJob
+    displayName: 'Build and Test'
+    steps:
+    - task: UseDotNet@2
+      displayName: 'Use .NET 8.0'
+      inputs:
+        version: '8.0.x'
+    
+    - task: DotNetCoreCLI@2
+      displayName: 'Restore NuGet Packages'
+      inputs:
+        command: 'restore'
+        projects: '**/*.csproj'
+    
+    - task: DotNetCoreCLI@2
+      displayName: 'Build Solution'
+      inputs:
+        command: 'build'
+        projects: '**/*.csproj'
+        arguments: '--configuration $(buildConfiguration)'
+    
+    - task: DotNetCoreCLI@2
+      displayName: 'Run Tests'
+      inputs:
+        command: 'test'
+        projects: '**/*Tests.csproj'
+        arguments: '--configuration $(buildConfiguration) --no-build'
+    
+    - task: DotNetCoreCLI@2
+      displayName: 'Publish Application'
+      inputs:
+        command: 'publish'
+        publishWebProjects: true
+        arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)'
+        zipAfterPublish: true
+    
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Artifacts'
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'drop'
+        publishLocation: 'Container'
+```
+
+#### 2.2 パイプラインの作成
+
+1. Azure DevOps → Pipelines → Create Pipeline
+2. 「Azure Repos Git」を選択
+3. リポジトリ `az400-lab2-pipeline` を選択
+4. 「Existing Azure Pipelines YAML file」を選択
+5. Path: `/azure-pipelines.yml`
+6. 「Continue」→「Run」をクリック
+
+#### 2.3 実行結果の確認
+
+- パイプラインが正常に実行されることを確認
+- 各ステップのログを確認
+
+### Exercise 3: Cache タスクの実装（重要）
+
+#### 3.1 NuGet パッケージのキャッシュ
+
+`azure-pipelines.yml` を更新：
+
+```yaml
+# azure-pipelines.yml（Cacheタスクを追加）
+trigger:
+  branches:
+    include:
+    - main
+    - develop
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  buildConfiguration: 'Release'
+  NUGET_PACKAGES: $(Pipeline.Workspace)/.nuget/packages
+
+stages:
+- stage: Build
+  displayName: 'Build Stage'
+  jobs:
+  - job: BuildJob
+    displayName: 'Build and Test'
+    steps:
+    - task: UseDotNet@2
+      displayName: 'Use .NET 8.0'
+      inputs:
+        version: '8.0.x'
+    
+    # ✅ Cache タスクを追加（重要）
+    - task: Cache@2
+      displayName: 'Cache NuGet Packages'
+      inputs:
+        key: 'nuget | "$(Agent.OS)" | **/packages.lock.json'
+        restoreKeys: |
+          nuget | "$(Agent.OS)"
+          nuget
+        path: $(NUGET_PACKAGES)
+      
+    - task: DotNetCoreCLI@2
+      displayName: 'Restore NuGet Packages'
+      inputs:
+        command: 'restore'
+        projects: '**/*.csproj'
+    
+    - task: DotNetCoreCLI@2
+      displayName: 'Build Solution'
+      inputs:
+        command: 'build'
+        projects: '**/*.csproj'
+        arguments: '--configuration $(buildConfiguration) --no-restore'
+    
+    # ... 残りのステップは同じ
+```
+
+#### 3.2 キャッシュの動作確認
+
+```powershell
+# 変更をコミット
+git add azure-pipelines.yml
+git commit -m "Add NuGet cache"
+git push
+```
+
+1. パイプラインが実行されることを確認
+2. ログで「Cache NuGet Packages」を確認
+3. 初回実行: `Cache not found`
+4. 2回目実行: `Cache restored` が表示されることを確認
+
+#### 3.3 Cache vs Artifacts の比較表（試験重要）
+
+| 項目 | Cache タスク | Pipeline Artifacts |
+|------|-------------|-------------------|
+| 用途 | 依存関係のキャッシュ | ビルド成果物の保存 |
+| 例 | npm packages, NuGet, pip | .zip, .dll, .exe |
+| 保存期間 | 7日間（デフォルト） | 30日間（デフォルト） |
+| 共有範囲 | 同じパイプライン内 | パイプライン間で共有可能 |
+| タスク | `Cache@2` | `PublishBuildArtifacts@1` |
+
+### Exercise 4: System.Debug による詳細ログ（重要）
+
+#### 4.1 System.Debug 変数の追加
+
+`azure-pipelines.yml` を更新：
+
+```yaml
+# azure-pipelines.yml
+trigger:
+  branches:
+    include:
+    - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  buildConfiguration: 'Release'
+  NUGET_PACKAGES: $(Pipeline.Workspace)/.nuget/packages
+  # ✅ System.Debug を追加（詳細ログを有効化）
+  System.Debug: true
+
+stages:
+- stage: Build
+  # ... 以降は同じ
+```
+
+#### 4.2 詳細ログの確認
+
+```powershell
+git add azure-pipelines.yml
+git commit -m "Enable System.Debug"
+git push
+```
+
+パイプライン実行ログで確認：
+- ✅ 各タスクの詳細な実行ログが表示される
+- ✅ 環境変数の値が表示される
+- ✅ タスクの内部処理が可視化される
+
+#### 4.3 System.Debug のユースケース
+
+| シナリオ | System.Debug | 効果 |
+|----------|--------------|------|
+| 通常運用 | false | ログが簡潔で見やすい |
+| トラブルシューティング | true | 詳細な情報で原因特定が容易 |
+| パフォーマンス最適化 | true | 各ステップの実行時間を確認 |
+
+### Exercise 5: YAML テンプレートの作成
+
+#### 5.1 テンプレートファイルの作成
+
+`templates/build-template.yml` を作成：
+
+```yaml
+# templates/build-template.yml
+parameters:
+- name: buildConfiguration
+  type: string
+  default: 'Release'
+- name: dotnetVersion
+  type: string
+  default: '8.0.x'
+
+steps:
+- task: UseDotNet@2
+  displayName: 'Use .NET ${{ parameters.dotnetVersion }}'
+  inputs:
+    version: '${{ parameters.dotnetVersion }}'
+
+- task: Cache@2
+  displayName: 'Cache NuGet Packages'
+  inputs:
+    key: 'nuget | "$(Agent.OS)" | **/packages.lock.json'
+    restoreKeys: |
+      nuget | "$(Agent.OS)"
+      nuget
+    path: $(NUGET_PACKAGES)
+
+- task: DotNetCoreCLI@2
+  displayName: 'Restore NuGet Packages'
+  inputs:
+    command: 'restore'
+    projects: '**/*.csproj'
+
+- task: DotNetCoreCLI@2
+  displayName: 'Build Solution'
+  inputs:
+    command: 'build'
+    projects: '**/*.csproj'
+    arguments: '--configuration ${{ parameters.buildConfiguration }} --no-restore'
+
+- task: DotNetCoreCLI@2
+  displayName: 'Run Tests'
+  inputs:
+    command: 'test'
+    projects: '**/*Tests.csproj'
+    arguments: '--configuration ${{ parameters.buildConfiguration }} --no-build'
+```
+
+#### 5.2 メインパイプラインでテンプレートを使用
+
+`azure-pipelines.yml` を更新：
+
+```yaml
+# azure-pipelines.yml（テンプレート使用）
+trigger:
+  branches:
+    include:
+    - main
+    - develop
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  buildConfiguration: 'Release'
+  NUGET_PACKAGES: $(Pipeline.Workspace)/.nuget/packages
+  System.Debug: false  # デバッグ完了後は false に戻す
+
+stages:
+- stage: Build
+  displayName: 'Build Stage'
+  jobs:
+  - job: BuildJob
+    displayName: 'Build and Test'
+    steps:
+    # ✅ テンプレートを使用
+    - template: templates/build-template.yml
+      parameters:
+        buildConfiguration: $(buildConfiguration)
+        dotnetVersion: '8.0.x'
+    
+    - task: DotNetCoreCLI@2
+      displayName: 'Publish Application'
+      inputs:
+        command: 'publish'
+        publishWebProjects: true
+        arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)'
+        zipAfterPublish: true
+    
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Artifacts'
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'drop'
+```
+
+#### 5.3 extends の使用（試験重要）
+
+`templates/base-pipeline.yml` を作成：
+
+```yaml
+# templates/base-pipeline.yml
+parameters:
+- name: buildConfiguration
+  type: string
+  default: 'Release'
+
+stages:
+- stage: Build
+  jobs:
+  - job: BuildJob
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - template: build-template.yml
+      parameters:
+        buildConfiguration: ${{ parameters.buildConfiguration }}
+```
+
+`azure-pipelines-extends.yml` を作成：
+
+```yaml
+# azure-pipelines-extends.yml
+# ✅ extends を使用してテンプレートを継承
+extends:
+  template: templates/base-pipeline.yml
+  parameters:
+    buildConfiguration: 'Release'
+```
+
+### Exercise 6: Branch Policy の設定
+
+#### 6.1 Branch Policy の有効化
+
+1. Azure DevOps → Repos → Branches
+2. `main` ブランチの「...」→「Branch policies」をクリック
+3. 以下を設定：
+
+**Require a minimum number of reviewers**
+- ✅ 有効化
+- Minimum number of reviewers: 1
+- ✅ Allow requestors to approve their own changes（学習用にチェック）
+
+**Check for linked work items**
+- ✅ Required
+
+**Check for comment resolution**
+- ✅ Required
+
+**Build Validation**
+- ✅ 追加
+- Build pipeline: `az400-lab2-pipeline`
+- Trigger: Automatic
+- Policy requirement: Required
+- Build expiration: Immediately
+
+#### 6.2 Status Policy の追加（SonarCloud などの外部チェック用）
+
+```yaml
+# azure-pipelines.yml に Status チェックを追加
+stages:
+- stage: Build
+  jobs:
+  - job: BuildJob
+    steps:
+    # ... ビルドステップ
+    
+    # ✅ Status Policy 用のチェック
+    - script: |
+        echo "Running quality gate check"
+        # 実際には SonarCloud などの品質チェックを実行
+      displayName: 'Quality Gate Check'
+```
+
+Branch Policy で「Status Check」を追加：
+1. Branch policies → Status checks
+2. 「+ Add status policy」をクリック
+3. Status to check: `Quality Gate`
+4. Policy requirement: Required
+
+### Exercise 7: Pull Request でのパイプライン実行
+
+#### 7.1 Feature ブランチの作成
+
+```powershell
+git checkout -b feature/add-logging
+
+# コードを変更
+"// Add logging" | Add-Content WebApp\Program.cs
+git add .
+git commit -m "Add logging comment"
+git push origin feature/add-logging
+```
+
+#### 7.2 Pull Request の作成
+
+1. Azure DevOps → Repos → Pull requests
+2. 「New pull request」をクリック
+3. Source: `feature/add-logging`
+4. Target: `main`
+5. Title: `Add logging feature`
+6. Work Items をリンク（必須）
+7. 「Create」をクリック
+
+#### 7.3 ビルド検証の確認
+
+- ✅ パイプラインが自動的に実行される
+- ✅ ビルドが成功するまでマージできない
+- ✅ すべての Policy を満たすと「Complete」ボタンが有効化
+
+## 📊 演習のまとめ
+
+### Cache タスクの書き方（重要）
+
+```yaml
+# NuGet の場合
+- task: Cache@2
+  inputs:
+    key: 'nuget | "$(Agent.OS)" | **/packages.lock.json'
+    path: $(NUGET_PACKAGES)
+
+# npm の場合
+- task: Cache@2
+  inputs:
+    key: 'npm | "$(Agent.OS)" | **/package-lock.json'
+    path: $(npm_config_cache)
+
+# pip の場合
+- task: Cache@2
+  inputs:
+    key: 'python | "$(Agent.OS)" | requirements.txt'
+    path: $(PIP_CACHE_DIR)
+```
+
+### 変数の使い方
+
+| 変数 | 用途 | 設定値 |
+|------|------|--------|
+| System.Debug | 詳細ログ | `true` または `false` |
+| buildConfiguration | ビルド構成 | `Debug` または `Release` |
+| Build.ArtifactStagingDirectory | 成果物の出力先 | システム提供 |
+
+## ✅ 確認問題
+
+### Q1: npm パッケージのキャッシュに使用すべきタスクは？
+- [ ] A. PublishBuildArtifacts
+- [ ] B. Cache
+- [ ] C. DownloadBuildArtifacts
+- [ ] D. PublishPipelineArtifact
+
+<details>
+<summary>解答</summary>
+
+**正解: B**
+
+説明:
+- npm、NuGet、pip などの依存関係のキャッシュには `Cache@2` タスクを使用
+- Artifacts タスクはビルド成果物の保存に使用
+</details>
+
+### Q2: パイプラインの詳細ログを有効にする変数は？
+- [ ] A. Debug
+- [ ] B. System.Log
+- [ ] C. System.Debug
+- [ ] D. EnableDebugLog
+
+<details>
+<summary>解答</summary>
+
+**正解: C**
+
+説明:
+- `System.Debug = true` で詳細ログを有効化
+- トラブルシューティング時に非常に有用
+</details>
+
+### Q3: テンプレートを継承してパイプラインを拡張するキーワードは？
+- [ ] A. template
+- [ ] B. extends
+- [ ] C. include
+- [ ] D. import
+
+<details>
+<summary>解答</summary>
+
+**正解: B**
+
+説明:
+- `extends` キーワードでテンプレートを継承
+- コードの再利用とメンテナンス性が向上
+</details>
+
+## 🔍 トラブルシューティング
+
+### キャッシュがヒットしない
+```yaml
+# キーの確認
+- script: |
+    echo "Agent.OS: $(Agent.OS)"
+    echo "Build.SourcesDirectory: $(Build.SourcesDirectory)"
+  displayName: 'Debug Cache Key'
+```
+
+### パイプラインが実行されない
+- Trigger の設定を確認
+- Branch Policy の設定を確認
+- YAML の構文エラーを確認
+
+## 📚 参考リンク
+- [Azure Pipelines YAML スキーマ](https://learn.microsoft.com/azure/devops/pipelines/yaml-schema/)
+- [Cache タスク](https://learn.microsoft.com/azure/devops/pipelines/tasks/utility/cache)
+- [Branch Policies](https://learn.microsoft.com/azure/devops/repos/git/branch-policies)
+
+## ➡️ 次のステップ
+Lab 2 が完了したら、[Lab 3: Azure Artifacts パッケージ管理](./03-Azure-Artifacts-パッケージ管理.md) に進んでください。
+
+---
+
+**Excellent work! You've mastered Azure Pipelines basics! 🚀**
