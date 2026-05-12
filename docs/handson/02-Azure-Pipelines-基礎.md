@@ -73,7 +73,7 @@ dotnet test
 
 ```powershell
 # リモートリポジトリを追加
-git remote add origin https://dev.azure.com/your-org/AZ400-HandsOn/_git/az400-lab2-pipeline
+git remote add origin https://dev.azure.com/bell999/az400-handson3/_git/az400-lab2-pipeline
 
 # ファイルをコミット
 git add .

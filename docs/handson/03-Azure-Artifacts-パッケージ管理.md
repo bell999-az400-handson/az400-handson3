@@ -37,7 +37,7 @@
 2. 以下を入力：
    - Name: `az400-package-feed`
    - Visibility: 
-     - ✅ Members of {your-organization}（組織内のみ）
+     - ✅ Members of bell999（組織内のみ）
    - Upstream sources:
      - ✅ Include packages from common public sources
      - nuget.org, npmjs.com, PyPI などを含める
@@ -55,7 +55,7 @@
 
 ```powershell
 # Azure DevOps 拡張機能で Feed を確認
-az artifacts universal package list --feed az400-package-feed --organization https://dev.azure.com/your-org --project AZ400-HandsOn
+az artifacts universal package list --feed az400-package-feed --organization https://dev.azure.com/bell999 --project az400-handson3
 ```
 
 ### Exercise 2: NuGet パッケージの作成
@@ -161,7 +161,7 @@ $env:VSS_NUGET_EXTERNAL_FEED_ENDPOINTS = @"
 {
   "endpointCredentials": [
     {
-      "endpoint": "https://pkgs.dev.azure.com/your-org/_packaging/az400-package-feed/nuget/v3/index.json",
+      "endpoint": "https://pkgs.dev.azure.com/bell999/_packaging/az400-package-feed/nuget/v3/index.json",
       "password": "your-personal-access-token"
     }
   ]
@@ -176,13 +176,13 @@ $env:VSS_NUGET_EXTERNAL_FEED_ENDPOINTS = @"
 3. 「NuGet.exe」を選択
 4. ソース URL をコピー（例）：
    ```
-   https://pkgs.dev.azure.com/your-org/_packaging/az400-package-feed/nuget/v3/index.json
+   https://pkgs.dev.azure.com/bell999/_packaging/az400-package-feed/nuget/v3/index.json
    ```
 
 ```powershell
 # NuGet ソースを追加
 dotnet nuget add source `
-  https://pkgs.dev.azure.com/your-org/_packaging/az400-package-feed/nuget/v3/index.json `
+  https://pkgs.dev.azure.com/bell999/_packaging/az400-package-feed/nuget/v3/index.json `
   --name Az400Feed `
   --username any `
   --password your-PAT `
@@ -358,7 +358,7 @@ stages:
       inputs:
         command: 'push'
         packagesToPush: '$(Build.ArtifactStagingDirectory)/**/*.nupkg'
-        publishVstsFeed: 'AZ400-HandsOn/az400-package-feed'
+        publishVstsFeed: 'az400-handson3/az400-package-feed'
         allowPackageConflicts: false
 ```
 

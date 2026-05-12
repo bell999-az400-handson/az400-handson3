@@ -97,12 +97,52 @@ git push -u origin main
 # ブラウザで https://github.com/bell999-az400-handson/az400-handson3 にアクセス
 ```
 
+#### 1.3 デフォルトブランチをmainに変更（重要）
+
+GitHubのベストプラクティスとして、デフォルトブランチ名を `master` から `main` に変更します。
+
+**ローカルとリモートのブランチをmainに統一:**
+
+```powershell
+# 現在のブランチ状態を確認
+git branch -a
+
+# ローカルのmasterブランチをmainにリネーム
+git branch -m master main
+
+# リモートにmainブランチをプッシュ
+git push -u origin main
+
+# GitHubのデフォルトブランチをmainに変更（GitHub CLI使用）
+gh repo edit bell999-az400-handson/az400-handson3 --default-branch main
+
+# リモートのmasterブランチを削除
+git push origin --delete master
+
+# リモートHEADポインタを更新
+git remote set-head origin -a
+
+# 変更を確認
+git branch -a
+# 出力: * main
+#       remotes/origin/main
+```
+
+**💡 ポイント:**
+- `git branch -m` でローカルブランチ名を変更
+- `gh repo edit --default-branch` でGitHubのデフォルトブランチを変更
+- 古いmasterブランチは削除して混乱を避ける
+- すべてのコマンドはローカルとリモート両方を同期する
+
+**⚠️ 注意:**
+既にリモートリポジトリにmainブランチが存在する場合は、この手順は不要です。新規作成時や既存のmasterブランチからの移行時のみ実行してください。
+
 ### Exercise 2: Azure Boards の準備
 
 #### 2.1 Work Item の作成
 
 1. [Azure DevOps](https://dev.azure.com/) にアクセス
-2. Organization → `AZ400-HandsOn` プロジェクトを開く
+2. Organization → `az400-handson3` プロジェクトを開く
 3. 左メニュー「Boards」→「Work items」をクリック
 4. 「+ New Work Item」→「User Story」を選択
 5. 以下を入力：
@@ -122,22 +162,132 @@ git push -u origin main
 
 #### 3.1 GitHub 接続の追加
 
+**方法1: Web UI で接続（基本）**
+
 1. Azure DevOps プロジェクトで「Project Settings」（左下の歯車アイコン）をクリック
 2. 左メニュー「Boards」→「GitHub connections」を選択
 3. 「Connect your GitHub account」をクリック
 4. GitHub にリダイレクトされたら「Authorize」をクリック
 5. 接続が成功したことを確認
 
+**方法2: Azure DevOps CLI で接続（推奨）**
+
+```powershell
+# 前提: GitHub Personal Access Token (PAT) の作成
+# 1. GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)
+# 2. "Generate new token (classic)" をクリック
+# 3. Scopes を選択:
+#    - repo (Full control of private repositories)
+#    - admin:repo_hook (Full control of repository hooks)
+# 4. トークンをコピーして安全に保存
+
+# 環境変数にトークンを設定（セッション内で一時的に保存）
+$env:GITHUB_PAT = "ghp_YourPersonalAccessTokenHere"
+
+# Azure DevOps にログイン
+az login
+az devops configure --defaults organization=https://dev.azure.com/bell999 project=az400-handson3
+
+# GitHub Service Endpoint を作成
+az devops service-endpoint github create `
+  --name "GitHub-Connection" `
+  --github-url "https://github.com/bell999-az400-handson/az400-handson3" `
+  --github-token $env:GITHUB_PAT `
+  --org https://dev.azure.com/bell999 `
+  --project az400-handson3
+
+# 作成された Service Endpoint を確認
+az devops service-endpoint list `
+  --org https://dev.azure.com/bell999 `
+  --project az400-handson3 `
+  --output table
+
+# Azure Boards 用の GitHub 接続を有効化
+# 注意: Azure Boards と GitHub の連携は Web UI での初回承認が必要な場合があります
+```
+
+**💡 ポイント:**
+- GitHub PAT には `repo` と `admin:repo_hook` スコープが必要
+- PAT は安全に保管し、環境変数や Azure Key Vault に保存
+- Service Endpoint は CI/CD パイプラインでも使用可能
+- Azure Boards の GitHub 連携は、初回のみ Web UI での OAuth 承認が必要な場合があります
+
+**⚠️ セキュリティベストプラクティス:**
+```powershell
+# PAT をセッション後にクリア
+Remove-Item Env:\GITHUB_PAT
+
+# または Azure Key Vault に保存して使用
+az keyvault secret set `
+  --vault-name "your-keyvault" `
+  --name "github-pat" `
+  --value $env:GITHUB_PAT
+
+# Key Vault から取得して使用
+$env:GITHUB_PAT = az keyvault secret show `
+  --vault-name "your-keyvault" `
+  --name "github-pat" `
+  --query value -o tsv
+```
+
 #### 3.2 リポジトリの追加
+
+**方法1: Web UI で追加**
 
 1. 「+ Add GitHub repositories」をクリック
 2. `az400-handson3` リポジトリを選択
 3. 「Save」をクリック
 
+**方法2: Azure DevOps REST API で追加（コマンドライン）**
+
+```powershell
+# 前提: Service Endpoint ID を取得
+$serviceEndpointId = az devops service-endpoint list `
+  --org https://dev.azure.com/bell999 `
+  --project az400-handson3 `
+  --query "[?name=='GitHub-Connection'].id" -o tsv
+
+# GitHub リポジトリを Azure Boards に接続
+# 注意: Azure Boards 専用の GitHub 接続は REST API での自動化が制限されています
+# Web UI での初回承認後、以下のコマンドで確認可能
+
+# GitHub 接続済みリポジトリを確認
+az repos list `
+  --org https://dev.azure.com/bell999 `
+  --project az400-handson3 `
+  --output table
+```
+
+**💡 Azure Boards と GitHub の統合に関する重要な注意:**
+
+Azure Boards の GitHub 接続は、**Service Endpoint** とは異なる専用の接続方式を使用します：
+
+1. **Service Endpoint** (上記 3.1 で作成):
+   - Azure Pipelines で GitHub リポジトリにアクセスするために使用
+   - `az devops service-endpoint` コマンドで管理可能
+   - CI/CD パイプラインで参照
+
+2. **Azure Boards GitHub Connection**:
+   - Work Item と Pull Request をリンクするために使用
+   - **初回は Web UI での OAuth 承認が必須**
+   - Project Settings → Boards → GitHub connections で管理
+
+**推奨アプローチ:**
+- **初回セットアップ**: Web UI で OAuth 承認を完了（3.1 の方法1）
+- **以降の管理**: CLI や REST API でリポジトリを追加・削除
+
 #### 確認方法
 ```powershell
-# Azure DevOps CLI で確認
-az boards github repo list --org https://dev.azure.com/your-org --project AZ400-HandsOn
+# Azure DevOps CLI で Service Endpoint を確認
+az devops service-endpoint list `
+  --org https://dev.azure.com/bell999 `
+  --project az400-handson3 `
+  --output table
+
+# GitHub CLI でリポジトリの接続状態を確認
+gh repo view bell999-az400-handson/az400-handson3 --json url,name
+
+# Azure Boards の Work Item から GitHub リンクをテスト（後のExerciseで実施）
 ```
 
 ### Exercise 4: AB# の動作確認（title での認識）
@@ -151,7 +301,7 @@ Set-Location c:\Users\bell9\github\az400-handson3
 git checkout -b feature/login-implementation
 
 # コードを変更
-"function login() { return true; }" | Add-Content app.js
+"function login() { return true; }" | Add-Content src/app.js
 git add app.js
 git commit -m "Implement basic login function"
 git push origin feature/login-implementation
@@ -317,6 +467,32 @@ git push origin feature/add-tests
 | Automatically watch repositories | **OFF** | 不要な通知を減らす |
 | Automatically watch teams | **OFF** | 不要な通知を減らす |
 
+### Azure DevOps と GitHub の接続方式
+
+| 接続方式 | 用途 | 作成方法 | 認証 |
+|----------|------|----------|------|
+| **Service Endpoint** | CI/CD パイプライン | `az devops service-endpoint` | GitHub PAT |
+| **Azure Boards GitHub Connection** | Work Item 連携（AB#） | Web UI（初回OAuth必須） | OAuth + PAT |
+
+### コマンドラインでの主要操作
+
+```powershell
+# GitHub PAT の作成（GitHub Web UI で実施）
+# Scopes: repo, admin:repo_hook
+
+# Service Endpoint の作成
+az devops service-endpoint github create `
+  --name "GitHub-Connection" `
+  --github-url "https://github.com/ORG/REPO" `
+  --github-token $env:GITHUB_PAT
+
+# Service Endpoint の確認
+az devops service-endpoint list --output table
+
+# Azure Boards と GitHub の接続確認（Web UI）
+# Project Settings → Boards → GitHub connections
+```
+
 ## ✅ 確認問題
 
 ### Q1: AB# が認識される場所を2つ選んでください
@@ -370,6 +546,41 @@ git push origin feature/add-tests
 4. Pull Request を作成（AB# でリンク）
 </details>
 
+### Q4: Azure DevOps CLI で GitHub Service Endpoint を作成する際に必要な GitHub PAT のスコープを2つ選んでください
+- [ ] A. repo
+- [ ] B. user
+- [ ] C. admin:repo_hook
+- [ ] D. workflow
+
+<details>
+<summary>解答</summary>
+
+**正解: A と C**
+
+説明:
+- **repo**: リポジトリへのフルアクセス（プライベートリポジトリ含む）
+- **admin:repo_hook**: リポジトリフックの管理（Azure Boards との連携に必要）
+- user や workflow は Azure Boards 連携には不要
+</details>
+
+### Q5: Azure Boards の GitHub 連携で正しい説明を選んでください
+- [ ] A. Service Endpoint と Azure Boards GitHub Connection は同じもの
+- [ ] B. Azure Boards GitHub Connection の初回承認は Web UI が必須
+- [ ] C. すべての操作を Azure DevOps CLI で自動化できる
+- [ ] D. GitHub PAT は不要で OAuth のみで接続できる
+
+<details>
+<summary>解答</summary>
+
+**正解: B**
+
+説明:
+- A: **誤り** - Service Endpoint（CI/CD用）と Azure Boards GitHub Connection（Work Item連携用）は異なる
+- B: **正しい** - Azure Boards の GitHub 接続は初回 OAuth 承認が Web UI で必須
+- C: **誤り** - Azure Boards GitHub Connection の初回承認は Web UI が必要
+- D: **誤り** - Service Endpoint 作成には GitHub PAT が必要（OAuth は Web UI での承認用）
+</details>
+
 ## 🔍 トラブルシューティング
 
 ### AB# が認識されない
@@ -380,16 +591,55 @@ git push origin feature/add-tests
 ### GitHub 接続エラー
 ```powershell
 # Azure DevOps CLI で接続を確認
-az devops project show --org https://dev.azure.com/your-org --project AZ400-HandsOn
+az devops project show --org https://dev.azure.com/bell999 --project az400-handson3
 
-# GitHub 接続を再認証
+# Service Endpoint の状態を確認
+az devops service-endpoint list `
+  --org https://dev.azure.com/bell999 `
+  --project az400-handson3 `
+  --output table
+
+# GitHub PAT の有効性を確認
+gh auth status
+
+# GitHub 接続を再認証（Web UI）
 # Project Settings → GitHub connections → Re-authorize
+```
+
+### Service Endpoint のトラブルシューティング
+```powershell
+# Service Endpoint の詳細を確認
+$endpointId = az devops service-endpoint list `
+  --org https://dev.azure.com/bell999 `
+  --project az400-handson3 `
+  --query "[0].id" -o tsv
+
+az devops service-endpoint show `
+  --id $endpointId `
+  --org https://dev.azure.com/bell999 `
+  --project az400-handson3
+
+# Service Endpoint の削除（再作成が必要な場合）
+az devops service-endpoint delete `
+  --id $endpointId `
+  --org https://dev.azure.com/bell999 `
+  --project az400-handson3 `
+  --yes
+
+# GitHub PAT の権限を確認（GitHub CLI）
+gh auth status
+gh api user -q .login
+
+# 必要なスコープの確認
+# repo, admin:repo_hook が含まれているか確認
 ```
 
 ## 📚 参考リンク
 - [Azure Boards と GitHub の統合](https://learn.microsoft.com/azure/devops/boards/github/)
 - [AB# 参照の使用](https://learn.microsoft.com/azure/devops/boards/github/link-to-from-github)
 - [GitHub 通知設定](https://docs.github.com/account-and-profile/managing-subscriptions-and-notifications-on-github/setting-up-notifications)
+- [Azure DevOps CLI - Service Endpoint](https://learn.microsoft.com/cli/azure/devops/service-endpoint)
+- [GitHub Personal Access Token の作成](https://docs.github.com/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
 
 ## ➡️ 次のステップ
 Lab 1 が完了したら、[Lab 2: Azure Pipelines 基礎](./02-Azure-Pipelines-基礎.md) に進んでください。
