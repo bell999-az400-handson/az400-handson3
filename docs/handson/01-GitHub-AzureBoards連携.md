@@ -213,21 +213,98 @@ az devops service-endpoint list `
 - Azure Boards の GitHub 連携は、初回のみ Web UI での OAuth 承認が必要な場合があります
 
 **⚠️ セキュリティベストプラクティス:**
+
+**オプション1: セッション後に環境変数をクリア**
 ```powershell
 # PAT をセッション後にクリア
 Remove-Item Env:\GITHUB_PAT
+```
 
-# または Azure Key Vault に保存して使用
+**オプション2: Azure Key Vault に保存（推奨）**
+
+Azure Key Vault を使用すると、PAT を安全に保管・管理できます。
+
+**Step 1: リソースグループと Key Vault を作成**
+```powershell
+# 1. リソースグループを作成（存在しない場合）
+az group create `
+  --name "rg-az400-handson3" `
+  --location "japaneast"
+
+# 2. 一意な Key Vault 名を生成
+# Key Vault 名はグローバルに一意である必要があるため、ユーザー名を含める
+$kvName = "kv-az400-$($env:USERNAME)"
+Write-Host "Key Vault name: $kvName"
+
+# 3. Key Vault を作成
+az keyvault create `
+  --name $kvName `
+  --resource-group "rg-az400-handson3" `
+  --location "japaneast" `
+  --enable-rbac-authorization true
+
+# 4. 自分に Key Vault Secrets Officer 権限を付与
+$userId = az ad signed-in-user show --query id -o tsv
+$subscriptionId = az account show --query id -o tsv
+
+az role assignment create `
+  --role "Key Vault Secrets Officer" `
+  --assignee $userId `
+  --scope "/subscriptions/$subscriptionId/resourceGroups/rg-az400-handson3/providers/Microsoft.KeyVault/vaults/$kvName"
+
+# 権限の伝播を待つ（30秒程度）
+Write-Host "Waiting for RBAC propagation..."
+Start-Sleep -Seconds 30
+```
+
+**Step 2: GitHub PAT を Key Vault に保存**
+```powershell
+# GitHub PAT を Key Vault に保存
 az keyvault secret set `
-  --vault-name "your-keyvault" `
+  --vault-name $kvName `
   --name "github-pat" `
   --value $env:GITHUB_PAT
 
-# Key Vault から取得して使用
+Write-Host "✅ GitHub PAT saved to Key Vault: $kvName"
+```
+
+**Step 3: Key Vault から PAT を取得して使用**
+```powershell
+# Key Vault から PAT を取得
 $env:GITHUB_PAT = az keyvault secret show `
-  --vault-name "your-keyvault" `
+  --vault-name $kvName `
   --name "github-pat" `
   --query value -o tsv
+
+# Service Endpoint を作成（Key Vault から取得した PAT を使用）
+az devops service-endpoint github create `
+  --name "GitHub-Connection" `
+  --github-url "https://github.com/bell999-az400-handson/az400-handson3" `
+  --org https://dev.azure.com/bell999 `
+  --project az400-handson3
+
+# セッション終了時にクリア（オプション）
+Remove-Item Env:\GITHUB_PAT
+```
+
+**💡 Key Vault を使うメリット:**
+- 🔒 PAT を平文ファイル（.env）に保存する必要がない
+- 🔒 Azure RBAC でアクセス制御が可能
+- 🔒 監査ログで誰がいつアクセスしたか記録される
+- 🔒 自動ローテーション（有効期限管理）が可能
+- 🔒 チームメンバーと安全に共有できる
+
+**📝 Key Vault 名の確認**
+```powershell
+# 作成した Key Vault 名を確認
+az keyvault list `
+  --resource-group "rg-az400-handson3" `
+  --query "[].name" -o tsv
+
+# シークレット一覧を確認
+az keyvault secret list `
+  --vault-name $kvName `
+  --query "[].name" -o tsv
 ```
 
 #### 3.2 リポジトリの追加
@@ -484,18 +561,147 @@ Subscriptions セクション:
 
 1. Azure DevOps → Project Settings → Service hooks
 2. 「+ Create subscription」をクリック
-3. サービスを選択: **Web Hooks** または **Teams**
+3. サービスを選択: 
+   - **Web Hooks** (推奨: 汎用的なHTTP通知)
+   - **Slack** (Slack統合)
+   - ~~**Teams**~~ (非推奨: Teams側から設定する方式に変更)
+   - その他: Azure Service Bus, Azure Storage, Jenkins など
+
+**💡 ポイント:**
+- Microsoft Teams 統合は **Teams側のアプリ管理から設定** (8.2参照)
+- Web Hooks を使えば任意のエンドポイント（Teams Incoming Webhookを含む）に通知可能
 
 #### 8.2 Teams 通知の設定（オプション）
 
-1. Service: **Microsoft Teams** を選択
-2. Trigger: **Pull request created** を選択
-3. Filters:
-   - Repository: `All`
-   - Target branch: `main`
-4. Action: **Post a message to a channel**
-5. Teams webhook URL を入力
+**⚠️ 重要な変更（2026年時点）**
+
+Azure DevOps の Service Hooks で **Microsoft Teams** を選択すると、以下のメッセージが表示されます：
+
+```
+Subscriptions for this service are managed by the consumer service. 
+To create a new subscription visit Microsoft Teams.
+```
+
+**現在の推奨方法: Teams側からAzure DevOps Appを追加**
+
+1. **Microsoft Teams** を開く
+2. 通知を受け取りたいチャネルを選択
+3. チャネル名の横の「…」→ **「コネクタ」** または **「アプリを管理」** をクリック
+4. **「Azure DevOps」** アプリを検索して追加
+5. **「構成」** をクリック
+6. 以下を設定：
+   - Organization: `https://dev.azure.com/bell999`
+   - Project: `az400-handson3`
+   - Event type: **Pull request created**, **Pull request merged** など
+   - Repository: 対象リポジトリを選択
+7. **「保存」** をクリック
+
+**💡 ポイント:**
+- 2026年現在、Azure DevOps → Teams の通知設定は **Teams側から行う方式に変更**
+- Azure DevOps の Service Hooks では Web Hooks または他のサービスを使用
+- Teams統合はより強力な機能（Work Item更新、ビルド結果など）を提供
+
+**代替方法: Incoming Webhook（従来の方法）**
+
+Teams で Incoming Webhook を使いたい場合：
+
+1. Teams チャネルで「…」→「コネクタ」→「Incoming Webhook」を追加
+2. Webhook URL をコピー
+3. Azure DevOps → Service Hooks → **Web Hooks** を選択（Teams ではない）
+4. Trigger: **Pull request created** を選択
+5. URL に Teams の Webhook URL を貼り付け
 6. 「Finish」をクリック
+
+#### 8.3 Slack 通知の設定（Teams の代替）
+
+**💡 Teams が個人版でアプリを追加できない場合は Slack を使用**
+
+Slack と Azure DevOps の統合には2つの方法があります。
+
+**前提: Slack Workspace の作成（初回のみ）**
+
+**⚠️ 重要（2026年版）**: Slack の新UIでは**アプリ内から新規ワークスペースを作成できません**。Web から作成する必要があります。
+
+1. **Slack 新規ワークスペース作成ページを開く**
+   - ブラウザで以下のURLにアクセス:
+   ```
+   https://slack.com/get-started#/createnew
+   ```
+
+2. **メールアドレスを入力**
+   - Slack から確認コードが送信されます
+
+3. **確認コードを入力**
+   - メールに届いた6桁のコードを入力
+
+4. **ワークスペース名を入力**
+   - 例: `az400-handson`、`devops-lab`、`project-2026` など
+   - 後から変更可能
+
+5. **プロジェクト名を入力（任意）**
+   - スキップも可能
+
+6. **メンバー招待（スキップ可）**
+   - 後から招待できるのでスキップしてOK
+
+7. **ワークスペース完成**
+   - ブラウザで Slack Workspace が開きます
+   - Slack デスクトップアプリを再起動すると、左側に新しいワークスペースが自動的に追加されます
+
+**💡 ポイント:**
+- **2024〜2026年の UI 刷新により、アプリ内の「別のワークスペースを追加」ボタンは削除されました**
+- ワークスペース作成は必ず Web から行う必要があります
+- 作成後は Slack アプリに自動的に同期されます
+
+**方法1: Slack Workspace から Azure DevOps アプリを追加（推奨）**
+
+1. **Slack Workspace** を開く
+2. 左サイドバーで **「アプリ」** をクリック
+3. **「アプリを検索」** で **「Azure DevOps」** を検索
+4. **「Azure DevOps」** アプリを選択して **「追加」** をクリック
+5. **「Azure DevOps に接続」** をクリック
+6. Azure DevOps へのサインインを求められるのでサインイン
+7. Organization と Project を承認
+8. Slack で通知を受け取りたいチャネルを選択
+9. 以下のコマンドで購読を設定：
+   ```
+   /azdevops subscribe https://dev.azure.com/bell999/az400-handson3
+   ```
+10. 通知したいイベントを選択：
+    - Pull requests created
+    - Pull requests merged
+    - Work items created
+    - Builds completed
+    など
+
+**方法2: Service Hooks で Slack を設定（従来の方法）**
+
+1. Slack Workspace で **Incoming Webhook** を設定：
+   - Slack → 「設定と管理」→「アプリを管理」
+   - 「Incoming Webhooks」を検索して追加
+   - チャネルを選択（例: `#azure-devops`）
+   - Webhook URL をコピー（例: `https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXX`）
+
+2. Azure DevOps で Service Hook を作成：
+   - Azure DevOps → Project Settings → Service hooks
+   - 「+ Create subscription」をクリック
+   - Service: **Slack** を選択
+   - Trigger: **Pull request created** を選択
+   - 「Next」をクリック
+   - Slack Webhook URL を貼り付け
+   - Message format を選択（推奨: **Detailed**）
+   - 「Finish」をクリック
+
+**💡 ポイント:**
+- **方法1**（Azure DevOps アプリ）の方が機能が豊富で双方向のコミュニケーションが可能
+- **方法2**（Incoming Webhook）はシンプルだが通知のみ（Azure DevOps への操作はできない）
+- Slack は無料プランでも Azure DevOps アプリを追加可能（Teamsの個人版と異なる）
+
+**動作確認:**
+
+1. GitHub で新しい Pull Request を作成
+2. Slack チャネルに通知が届くことを確認
+3. 通知に PR のタイトル、作成者、リンクが含まれていることを確認
 
 ### Exercise 9: Pull Request のマージと確認
 
@@ -556,6 +762,32 @@ Subscriptions セクション:
 |----------|------|----------|------|
 | **Service Endpoint** | CI/CD パイプライン | `az devops service-endpoint` | GitHub PAT |
 | **Azure Boards GitHub Connection** | Work Item 連携（AB#） | Web UI（初回OAuth必須） | OAuth + PAT |
+
+### Azure DevOps と Teams の統合方式（2026年時点）
+
+| 統合方法 | 設定場所 | 推奨度 | 説明 |
+|----------|----------|--------|------|
+| **Teams アプリ** | Teams側（推奨） | ⭐⭐⭐ | Teams → アプリ管理 → Azure DevOps を追加 |
+| **Incoming Webhook** | Azure DevOps Service Hooks | ⭐⭐ | Web Hooks経由でTeamsに通知 |
+| ~~**Service Hooks - Teams**~~ | ~~Azure DevOps~~ | ❌ 非推奨 | 「Teams側から設定してください」と表示される |
+
+**💡 ポイント:**
+- **2026年現在、Teams統合はTeams側から設定する方式に変更**
+- Azure DevOps の Service Hooks で "Microsoft Teams" を選択すると、Teams側での設定を促すメッセージが表示される
+- Teams アプリ方式の方が機能が豊富（Work Item、ビルド、PR、リリースなど）
+
+### Azure DevOps と Slack の統合方式
+
+| 統合方法 | 設定場所 | 推奨度 | 説明 |
+|----------|----------|--------|------|
+| **Slack アプリ** | Slack Workspace（推奨） | ⭐⭐⭐ | Slack → アプリ → Azure DevOps を追加 |
+| **Service Hooks - Slack** | Azure DevOps | ⭐⭐ | Service Hooks → Slack → Incoming Webhook URL |
+| **Web Hooks** | Azure DevOps | ⭐ | 汎用的だが設定が煩雑 |
+
+**💡 ポイント:**
+- **Slack は無料プランでも Azure DevOps アプリが使える**（Teams個人版との違い）
+- Slack アプリ方式なら `/azdevops` コマンドで双方向連携が可能
+- Service Hooks 方式は通知のみだが設定がシンプル
 
 ### コマンドラインでの主要操作
 
@@ -674,6 +906,56 @@ az devops service-endpoint list --output table
 - D: **誤り** - Service Endpoint 作成には GitHub PAT が必要（OAuth は Web UI での承認用）
 </details>
 
+### Q6: Azure DevOps と Microsoft Teams を統合する際の正しい方法を選んでください（2026年時点）
+- [ ] A. Azure DevOps の Service Hooks で Microsoft Teams を選択して設定
+- [ ] B. Teams 側から Azure DevOps アプリを追加して設定
+- [ ] C. Azure DevOps CLI で Teams 統合を設定
+- [ ] D. GitHub から直接 Teams に通知を送る
+
+<details>
+<summary>解答</summary>
+
+**正解: B**
+
+説明:
+- **A. 誤り**: Azure DevOps の Service Hooks で Microsoft Teams を選択すると、「Subscriptions for this service are managed by the consumer service. To create a new subscription visit Microsoft Teams.」というメッセージが表示され、設定できません
+- **B. 正しい**: 2026年現在、**Teams側から Azure DevOps アプリを追加**する方式が推奨されています
+  - Teams のチャネル → アプリを管理 → Azure DevOps を検索・追加
+  - より強力な機能（Work Item更新、ビルド結果、PR通知など）を提供
+- **C. 誤り**: Azure DevOps CLI では Teams 統合の設定はできません
+- **D. 誤り**: GitHub と Teams の直接統合は別の設定であり、Azure DevOps を経由しません
+
+**💡 代替方法:**
+Azure DevOps の Service Hooks で **Web Hooks** を選択し、Teams の **Incoming Webhook URL** を指定する方法もありますが、Azure DevOps アプリの方が機能が豊富です。
+
+</details>
+
+### Q7: Azure DevOps と Slack を統合する際の利点として正しいものを選んでください
+- [ ] A. Slack 無料プランでは Azure DevOps アプリを追加できない
+- [ ] B. Slack アプリ方式なら双方向連携（通知 + コマンド実行）が可能
+- [ ] C. Service Hooks で Slack を選択すると Teams と同じエラーメッセージが表示される
+- [ ] D. Slack への通知には必ず Azure DevOps CLI が必要
+
+<details>
+<summary>解答</summary>
+
+**正解: B**
+
+説明:
+- **A. 誤り**: Slack は**無料プランでも Azure DevOps アプリを追加可能**です（Teams個人版との大きな違い）
+- **B. 正しい**: Slack Workspace に Azure DevOps アプリを追加すると、`/azdevops subscribe` などのコマンドで双方向連携ができます
+  - 通知を受け取るだけでなく、Slackから Azure DevOps の操作も可能
+  - Work Item作成、ビルド確認、承認などが Slack 上で完結
+- **C. 誤り**: Service Hooks の Slack オプションは正常に動作します（Teams のようなエラーは出ない）
+- **D. 誤り**: Slack Workspace のアプリ管理画面から Azure DevOps アプリを追加できます（CLI不要）
+
+**💡 実務での推奨:**
+- **Teams が使えない場合（個人版など）は Slack が最適な代替手段**
+- Slack アプリ方式（推奨）> Service Hooks の Slack > Incoming Webhook
+- 無料で双方向連携できるのが Slack の強み
+
+</details>
+
 ## 🔍 トラブルシューティング
 
 ### AB# が認識されない
@@ -727,6 +1009,39 @@ gh api user -q .login
 # repo, admin:repo_hook が含まれているか確認
 ```
 
+### Microsoft Teams 統合のトラブルシューティング
+
+**問題: Azure DevOps の Service Hooks で Microsoft Teams を選択すると「Subscriptions for this service are managed by the consumer service」と表示される**
+
+<details>
+<summary>解決方法</summary>
+
+**✅ これは正常な動作です**
+
+2026年現在、Microsoft Teams との統合は **Teams側から設定する方式** に変更されました。
+
+**推奨される対処法:**
+
+1. **Teams アプリを使用する方法（推奨）**
+   - Microsoft Teams を開く
+   - 通知を受け取りたいチャネルを選択
+   - チャネル名の「…」→「アプリを管理」をクリック
+   - 「Azure DevOps」を検索して追加
+   - 構成で Organization とプロジェクトを指定
+
+2. **Incoming Webhook を使用する方法（代替）**
+   - Teams チャネルで「…」→「コネクタ」→「Incoming Webhook」を追加
+   - Webhook URL をコピー
+   - Azure DevOps → Service Hooks → **Web Hooks**（Teams ではない）を選択
+   - Trigger を選択（例: Pull request created）
+   - URL に Teams の Webhook URL を貼り付け
+
+**❌ 避けるべき方法:**
+- Azure DevOps の Service Hooks で "Microsoft Teams" を選択しようとすること
+  → 設定できないため、上記の方法を使用してください
+
+</details>
+
 ### GitHub通知設定のトラブルシューティング
 
 **問題: 「Automatically watch repositories」や「Automatically watch teams」が見つからない**
@@ -767,12 +1082,103 @@ GitHub は **2025年5月23日** にこれらの機能を**正式に廃止**し�
 
 </details>
 
+### Slack 統合のトラブルシューティング
+
+**問題: Slack に Azure DevOps アプリを追加したい（Teams 個人版が使えない）**
+
+<details>
+<summary>解決方法</summary>
+
+**✅ Slack は Teams 個人版の優れた代替手段です**
+
+**Slack のメリット:**
+- ✅ **無料プランでも Azure DevOps アプリが使える**（Teams個人版との違い）
+- ✅ 双方向連携（通知 + `/azdevops` コマンド実行）が可能
+- ✅ Work Item作成、ビルド確認、承認などが Slack 上で完結
+
+**設定手順:**
+
+1. **Slack Workspace に Azure DevOps アプリを追加**
+   - Slack の左サイドバーで「アプリ」をクリック
+   - 「Azure DevOps」を検索して追加
+   - Azure DevOps へのサインインを許可
+
+2. **Slack チャネルで購読を設定**
+   ```
+   /azdevops subscribe https://dev.azure.com/bell999/az400-handson3
+   ```
+
+3. **通知したいイベントを選択**
+   - Pull requests created
+   - Pull requests merged
+   - Builds completed
+   - Work items created
+
+**代替方法（Service Hooks）:**
+- Azure DevOps → Service Hooks → Slack
+- Slack Incoming Webhook URL を指定
+- この方式は通知のみ（コマンド実行不可）
+
+</details>
+
+**問題: Slack に通知が届かない**
+
+<details>
+<summary>解決方法</summary>
+
+**確認すべきポイント:**
+
+1. **Azure DevOps アプリが正しく接続されているか確認**
+   ```
+   /azdevops signin
+   ```
+   - Organization と Project が正しく認証されているか確認
+
+2. **購読が正しく設定されているか確認**
+   ```
+   /azdevops subscriptions
+   ```
+   - 購読一覧が表示される
+   - 通知したいイベントが含まれているか確認
+
+3. **Service Hooks を使用している場合**
+   ```powershell
+   # Azure DevOps で Service Hook の状態を確認
+   az devops service-endpoint list `
+     --org https://dev.azure.com/bell999 `
+     --project az400-handson3
+   ```
+   - Webhook URL が正しいか確認
+   - Trigger イベントが適切か確認
+
+4. **Slack チャネルのアクセス権限**
+   - Azure DevOps アプリがチャネルに参加しているか確認
+   - プライベートチャネルの場合は明示的に招待が必要
+
+</details>
+
 ## 📚 参考リンク
+
+**GitHub 統合:**
 - [Azure Boards と GitHub の統合](https://learn.microsoft.com/azure/devops/boards/github/)
 - [AB# 参照の使用](https://learn.microsoft.com/azure/devops/boards/github/link-to-from-github)
 - [GitHub 通知設定](https://docs.github.com/account-and-profile/managing-subscriptions-and-notifications-on-github/setting-up-notifications)
-- [Azure DevOps CLI - Service Endpoint](https://learn.microsoft.com/cli/azure/devops/service-endpoint)
 - [GitHub Personal Access Token の作成](https://docs.github.com/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
+- [GitHub Blog - 自動ウォッチ機能の廃止](https://github.blog/changelog/2025-04-14-sunset-notice-for-automatic-watching-of-repositories-and-teams/)
+
+**Azure DevOps:**
+- [Azure DevOps CLI - Service Endpoint](https://learn.microsoft.com/cli/azure/devops/service-endpoint)
+- [Service Hooks の概要](https://learn.microsoft.com/azure/devops/service-hooks/overview)
+
+**Microsoft Teams 統合:**
+- [Azure DevOps と Microsoft Teams の統合](https://learn.microsoft.com/azure/devops/pipelines/integrations/microsoft-teams)
+- [Teams に Azure DevOps アプリを追加する](https://learn.microsoft.com/azure/devops/service-hooks/services/teams)
+- [Teams Incoming Webhook の作成](https://learn.microsoft.com/microsoftteams/platform/webhooks-and-connectors/how-to/add-incoming-webhook)
+
+**Slack 統合:**
+- [Azure DevOps と Slack の統合](https://learn.microsoft.com/azure/devops/service-hooks/services/slack)
+- [Slack App Directory - Azure DevOps](https://slack.com/apps/AFH4Y66N9-azure-devops)
+- [Slack Incoming Webhooks の作成](https://api.slack.com/messaging/webhooks)
 
 ## ➡️ 次のステップ
 Lab 1 が完了したら、[Lab 2: Azure Pipelines 基礎](./02-Azure-Pipelines-基礎.md) に進んでください。
