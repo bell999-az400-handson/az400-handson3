@@ -313,7 +313,7 @@ git push origin feature/login-implementation
 2. 「Compare & pull request」ボタンをクリック
 3. **重要: Title に AB# を含める**
    ```
-   Title: AB#123: Implement login feature
+   Title: AB#574: Implement login feature
    Description: 
    This PR implements the basic login functionality.
    
