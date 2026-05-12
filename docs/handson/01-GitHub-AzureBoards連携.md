@@ -326,7 +326,7 @@ git push origin feature/login-implementation
 #### 4.3 Azure Boards で確認
 
 1. Azure DevOps → Boards → Work items
-2. Work Item #123 を開く
+2. Work Item #574 を開く
 3. 「Development」セクションを確認
 4. ✅ **Pull Request へのリンクが表示されることを確認**
 
@@ -340,8 +340,8 @@ git checkout main
 git checkout -b feature/add-tests
 
 # ファイルを追加
-"// Test placeholder" | Out-File app.test.js -Encoding utf8
-git add app.test.js
+"// Test placeholder" | Out-File src/app.test.js -Encoding utf8
+git add src/app.test.js
 git commit -m "Add test file"
 git push origin feature/add-tests
 ```
@@ -354,13 +354,13 @@ git push origin feature/add-tests
    Title: Add unit tests
    Description:
    This PR adds unit tests for the login feature.
-   Related Work Item: AB#124
+   Related Work Item: AB#575
    ```
 3. 「Create pull request」をクリック
 
 #### 5.3 確認
 
-1. Azure Boards で Work Item #124 を開く
+1. Azure Boards で Work Item #575 を開く
 2. ✅ **Pull Request へのリンクが表示されることを確認**
 
 ### Exercise 6: AB# が認識されない場所の確認
@@ -388,25 +388,95 @@ git push origin feature/add-tests
 
 #### 7.1 通知設定の確認
 
-1. GitHub で Settings → Notifications にアクセス
-2. 現在の設定を確認：
-   - **Watching**: フォロー中のリポジトリの全通知
-   - **Participating**: 自分が関与した通知のみ
-   - **Automatically watch repositories**: リポジトリへのアクセス時に自動Watch
-   - **Automatically watch teams**: チームに参加時に自動Watch
+**方法1: Web UI でアクセス**
+
+1. GitHub画面右上の**プロフィールアイコン**（自分のアバター）をクリック
+2. ドロップダウンメニューから「**Settings**」を選択
+3. 左サイドバーから「**Notifications**」を選択
+4. 通知設定ページが表示されます
+
+**方法2: 直接URLでアクセス**
+
+ブラウザで以下のURLにアクセス：
+```
+https://github.com/settings/notifications
+```
+
+**💡 ポイント:**
+- **リポジトリ設定**（Repository Settings）ではなく、**個人アカウント設定**（User Settings）から行います
+- プロフィールアイコンは画面右上にあります
+- 直接URLでアクセスするのが最も早い方法です
+
+**📋 GitHub通知設定ページの構成（2026年5月時点）**
+
+通知設定ページには主に以下のセクションがあります：
+1. **Default notification email**: 通知を受け取るメールアドレス
+2. **Subscriptions**: 通知の管理
+   - **Watching**: Watch中のリポジトリからの通知設定
+   - **Participating, @mentions and custom**: 自分が参加・メンションされた際の通知
+3. **Customize email updates**: メール通知の詳細設定
+4. **Ignored repositories**: 無視するリポジトリの管理
+5. **System**: システム通知（Actions、Dependabotなど）
 
 #### 7.2 最適な設定（試験重要ポイント）
 
-通知を減らすための推奨設定：
-- ✅ **Participating**: ON のまま（重要な通知は受け取る）
-- ❌ **Automatically watch repositories**: OFF（不要な通知を減らす）
-- ❌ **Automatically watch teams**: OFF（不要な通知を減らす）
+**❗ 重要な変更（2025年5月23日以降）**
 
-#### 設定方法
-1. Settings → Notifications
-2. 「Automatically watch repositories」のチェックを外す
-3. 「Automatically watch teams」のチェックを外す
-4. 「Update preferences」をクリック
+GitHub は **2025年5月23日** に以下の機能を**正式に廃止**しました：
+- ❌ **Automatically watch repositories**（リポジトリの自動ウォッチ）
+- ❌ **Automatically watch teams**（チームの自動ウォッチ）
+
+**廃止の理由（GitHub公式）:**
+- 通知ノイズを減らすため
+- 大規模Organization参加時に大量の不要なウォッチが発生する問題を解消
+- ユーザーが「自分で選んでウォッチする」モデルへ移行
+
+参考: [GitHub Blog - Sunset notice for automatic watching](https://github.blog/changelog/2025-04-14-sunset-notice-for-automatic-watching-of-repositories-and-teams/)
+
+**⚠️ 重要:**
+- 廃止前に自動ウォッチされていたリポジトリはそのまま維持されます
+- しかし、**新規に自動ウォッチされることはもうありません**
+- 今後はリポジトリを**手動でウォッチ**する必要があります
+
+#### 現在の推奨設定（2026年5月時点）
+
+**自動ウォッチ機能が廃止されたため、以下の方法で通知を管理します：**
+
+**1. 既にウォッチしているリポジトリを確認・解除**
+
+```
+手順:
+1. https://github.com/watching にアクセス
+2. Watch中のリポジトリ一覧が表示されます
+3. 不要なリポジトリの「Unwatch」ボタンをクリック
+4. または「Custom」を選択して通知レベルを調整
+```
+
+**通知レベルの種類:**
+- **All Activity**: すべてのアクティビティを通知（通知が多い）
+- **Ignore**: 通知を受け取らない
+- **Participating and @mentions**: 自分が参加・メンションされた場合のみ通知（推奨）
+- **Custom**: Issue、PR、Releaseなどを個別に設定
+
+**2. 通知方法を調整**
+
+https://github.com/settings/notifications で以下を確認：
+
+```
+Subscriptions セクション:
+- Watching: 「Notify me on GitHub, Email」（推奨: GitHub のみ）
+- Participating: 「Notify me on GitHub, Email」（推奨: 両方 ON）
+```
+
+**💡 実務での推奨アプローチ:**
+- 重要なリポジトリのみ手動でWatch
+- CODEOWNERS + Branch Protection Rulesでレビュー依頼を自動化
+- GitHub → Teams/Slack 連携で通知を集約
+
+**📌 AZ-400 試験対策のポイント:**
+- 2025年5月以前の試験問題では「Automatically watch」の設定が出題される可能性がありますが、**現在は廃止済み**です
+- 試験では「廃止された」という選択肢があるかもしれません
+- 実務では**手動ウォッチ管理**が標準になっています
 
 ### Exercise 8: Azure Repos への通知設定
 
@@ -458,14 +528,27 @@ git push origin feature/add-tests
 | Issue Label | ❌ 認識されない | Label には使用できない |
 | Commit Message | ✅ 認識される | `git commit -m "Fix AB#123"` |
 
-### GitHub 通知設定の推奨
+### GitHub 通知設定の推奨（試験重要！）
 
-| 設定項目 | 推奨値 | 理由 |
-|----------|--------|------|
-| Participating | ON | 自分が関与する通知は必要 |
-| Watching | 必要に応じて | 特定のリポジトリのみ |
-| Automatically watch repositories | **OFF** | 不要な通知を減らす |
-| Automatically watch teams | **OFF** | 不要な通知を減らす |
+**❗ 2025年5月23日の変更点:**
+
+| 項目 | 状態 | 説明 |
+|------|------|------|
+| **Automatically watch repositories** | ❌ **廃止** | GitHub公式が2025年5月23日に機能を廃止 |
+| **Automatically watch teams** | ❌ **廃止** | 同上 |
+
+**現在の推奨設定（2026年5月時点）:**
+
+| 設定項目 | 推奨値 | 設定場所 | 説明 |
+|----------|--------|----------|------|
+| **Watch管理** | 手動で選択 | https://github.com/watching | 必要なリポジトリのみWatch |
+| **Watching通知** | GitHub only | settings/notifications | メール通知を減らす |
+| **Participating通知** | GitHub + Email | settings/notifications | 重要な通知は両方で受け取る |
+
+**💡 実務での通知管理:**
+- **自動ウォッチは廃止**されたため、リポジトリごとに手動で設定
+- **Participating**（自分が参加・メンション）は自動で有効
+- https://github.com/watching で一括管理が便利
 
 ### Azure DevOps と GitHub の接続方式
 
@@ -511,21 +594,31 @@ az devops service-endpoint list --output table
 - Comment や Label では Work Item にリンクされない
 </details>
 
-### Q2: GitHub で通知を減らすために OFF にすべき設定を2つ選んでください
-- [ ] A. Participating
-- [ ] B. Automatically watch repositories
-- [ ] C. Watching
-- [ ] D. Automatically watch teams
+### Q2: GitHub 通知設定に関する正しい説明を選んでください（2026年5月時点）
+- [ ] A. Automatically watch repositories 設定を OFF にすることで通知を減らせる
+- [ ] B. 通知を減らすには https://github.com/watching で不要なリポジトリをUnwatchする
+- [ ] C. Automatically watch teams は Organization メンバーのみ設定可能
+- [ ] D. すべての通知を停止するには Email notifications を OFF にする
 
 <details>
 <summary>解答</summary>
 
-**正解: B と D**
+**正解: B のみ**
 
 説明:
-- **Automatically watch repositories**: OFF（リポジトリアクセス時に自動Watchしない）
-- **Automatically watch teams**: OFF（チーム参加時に自動Watchしない）
-- Participating は OFF にすると必要な通知も来なくなるため、ON のままにする
+- **A. 誤り**: Automatically watch repositories は **2025年5月23日に GitHub が廃止**しました。現在この設定は存在しません
+- **B. 正しい**: https://github.com/watching で Watch 中のリポジトリを確認・解除することで通知を減らせます（現在の推奨方法）
+- **C. 誤り**: Automatically watch teams も **廃止されました**。Organization メンバーでも設定できません
+- **D. 誤り**: Email notifications を完全に OFF にすると、重要な通知（Participating, @mentions）も受け取れなくなります
+
+**💡 試験対策ポイント:**
+- **2025年5月23日以降、自動ウォッチ機能は完全に廃止**
+- 現在は **手動でリポジトリをウォッチ/アンウォッチ** する方式
+- 古い試験問題では廃止前の設定が出題される可能性があります
+- 実務では https://github.com/watching での一括管理が標準
+
+**参考:**
+[GitHub Blog - Sunset notice for automatic watching](https://github.blog/changelog/2025-04-14-sunset-notice-for-automatic-watching-of-repositories-and-teams/)
 </details>
 
 ### Q3: Azure Boards と GitHub を連携するために必要な手順を正しい順序で並べてください
@@ -633,6 +726,46 @@ gh api user -q .login
 # 必要なスコープの確認
 # repo, admin:repo_hook が含まれているか確認
 ```
+
+### GitHub通知設定のトラブルシューティング
+
+**問題: 「Automatically watch repositories」や「Automatically watch teams」が見つからない**
+
+<details>
+<summary>解決方法</summary>
+
+**✅ これは正常です！**
+
+GitHub は **2025年5月23日** にこれらの機能を**正式に廃止**しました。
+
+**廃止された機能:**
+- ❌ Automatically watch repositories
+- ❌ Automatically watch teams
+
+**理由:**
+- 通知ノイズを減らすため
+- ユーザーが自分で選んでウォッチするモデルへ移行
+
+**現在の対処法:**
+
+1. **Watch中のリポジトリを管理**
+   - https://github.com/watching にアクセス
+   - 不要なリポジトリを「Unwatch」
+   - 必要なリポジトリのみ「Watch」を維持
+
+2. **通知設定を調整**
+   - https://github.com/settings/notifications
+   - 「Watching」を「Notify me on GitHub」のみに変更（メール通知を減らす）
+   - 「Participating」は「GitHub + Email」を維持（重要な通知）
+
+3. **リポジトリごとに個別設定**
+   - リポジトリページで「Watch」ボタンをクリック
+   - 「Participating and @mentions」を選択（推奨）
+
+**参考:**
+[GitHub Blog - Sunset notice](https://github.blog/changelog/2025-04-14-sunset-notice-for-automatic-watching-of-repositories-and-teams/)
+
+</details>
 
 ## 📚 参考リンク
 - [Azure Boards と GitHub の統合](https://learn.microsoft.com/azure/devops/boards/github/)
