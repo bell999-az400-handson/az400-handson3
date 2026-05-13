@@ -33,10 +33,9 @@
 #### 1.1 リポジトリの作成
 
 ```powershell
-# 新しいディレクトリを作成
-Set-Location ~\Documents
-New-Item -ItemType Directory -Name az400-lab2-pipeline
-Set-Location az400-lab2-pipeline
+# 新しいディレクトリを作成して移動
+New-Item -ItemType Directory -Path ~\github\az400-handson3-lab2 -Force
+Set-Location ~\github\az400-handson3-lab2
 
 # Git リポジトリを初期化
 git init
@@ -48,14 +47,19 @@ git branch -M main
 ```powershell
 # .NET Web API プロジェクトを作成
 dotnet new webapi -n WebApp
-Set-Location WebApp
 
-# テストプロジェクトを作成
+# 🔧 重要: .NET 10で作成された場合は.NET 8に変更
+# WebApp\WebApp.csproj の TargetFramework を net8.0 に変更
+# OpenApi関連のコードとパッケージを削除（.NET 8では非互換）
+
+# テストプロジェクトを作成（ルートレベルに作成）
 dotnet new xunit -n WebApp.Tests
 dotnet add WebApp.Tests\WebApp.Tests.csproj reference WebApp\WebApp.csproj
 
+# テストプロジェクトも.NET 8に変更
+# WebApp.Tests\WebApp.Tests.csproj の TargetFramework を net8.0 に変更
+
 # ソリューションファイルを作成
-Set-Location ..
 dotnet new sln -n WebApp
 dotnet sln add WebApp\WebApp.csproj
 dotnet sln add WebApp.Tests\WebApp.Tests.csproj
@@ -66,6 +70,8 @@ dotnet test
 ```
 
 #### 1.3 Azure Repos にプッシュ
+
+**方法1: Azure DevOps ポータルで手動作成**
 
 1. Azure DevOps → Repos → Files にアクセス
 2. リポジトリ名: `az400-lab2-pipeline`
@@ -80,6 +86,129 @@ git add .
 git commit -m "Initial commit: .NET Web API"
 git push -u origin main
 ```
+
+**方法2: Azure DevOps CLI で自動化（推奨）**
+
+Azure DevOps CLI でリポジトリ操作を行うには、Personal Access Token (PAT) が必要です。  
+[Lab 1: 01-Github-AzureBoards連携.md の Key Vault 連携](./01-Github-AzureBoards連携.md#オプション2-azure-key-vault-に保存推奨) と同じ方法で、PAT を安全に管理します。
+
+**Step 1: Azure DevOps PAT を作成**
+
+1. Azure DevOps にアクセス: `https://dev.azure.com/bell999`
+2. 右上のユーザーアイコン → 「Personal access tokens」をクリック
+3. 「+ New Token」をクリック
+4. 以下を設定：
+   - Name: `az400-handson3-pat`
+   - Organization: `bell999`
+   - Expiration: 30 days（または任意の期間）
+   - Scopes: 「Custom defined」を選択
+     - ✅ **Code**: Read, write, & manage
+     - ✅ **Build**: Read & execute
+     - ✅ **Project and Team**: Read, write, & manage
+5. 「Create」をクリック
+6. **重要**: 表示されたトークンをコピーして保存（一度しか表示されません）
+
+**Step 2: Azure Key Vault にPATを保存**
+
+```powershell
+# Azure にログイン
+az login --use-device-code
+
+# Key Vault が存在しない場合は作成（Lab 1 で作成済みの場合はスキップ）
+$kvName = "kv-az400-$($env:USERNAME)"
+
+# 既存の Key Vault を確認
+$kvExists = az keyvault list --query "[?name=='$kvName'].name" -o tsv
+
+if (-not $kvExists) {
+    Write-Host "Creating Key Vault: $kvName"
+    
+    # リソースグループを作成
+    az group create `
+      --name "rg-az400-handson3" `
+      --location "japaneast"
+    
+    # Key Vault を作成
+    az keyvault create `
+      --name $kvName `
+      --resource-group "rg-az400-handson3" `
+      --location "japaneast" `
+      --enable-rbac-authorization true
+    
+    # 自分に Key Vault Secrets Officer 権限を付与
+    $userId = az ad signed-in-user show --query id -o tsv
+    $subscriptionId = az account show --query id -o tsv
+    
+    az role assignment create `
+      --role "Key Vault Secrets Officer" `
+      --assignee $userId `
+      --scope "/subscriptions/$subscriptionId/resourceGroups/rg-az400-handson3/providers/Microsoft.KeyVault/vaults/$kvName"
+    
+    Write-Host "Waiting for RBAC propagation..."
+    Start-Sleep -Seconds 30
+}
+
+# Azure DevOps PAT を環境変数に設定（Step 1 でコピーしたトークンを貼り付け）
+$env:AZURE_DEVOPS_PAT = Read-Host -Prompt "Azure DevOps PAT を入力してください" -AsSecureString | ConvertFrom-SecureString -AsPlainText
+
+# PAT を Key Vault に保存
+az keyvault secret set `
+  --vault-name $kvName `
+  --name "azure-devops-pat" `
+  --value $env:AZURE_DEVOPS_PAT
+
+Write-Host "✅ Azure DevOps PAT saved to Key Vault: $kvName"
+```
+
+**Step 3: Key Vault から PAT を取得してリポジトリを作成**
+
+```powershell
+# Azure DevOps CLI 拡張機能をインストール（初回のみ）
+az extension add --name azure-devops
+
+# Key Vault から PAT を取得して環境変数に設定
+$kvName = "kv-az400-$($env:USERNAME)"
+$env:AZURE_DEVOPS_EXT_PAT = az keyvault secret show `
+  --vault-name $kvName `
+  --name "azure-devops-pat" `
+  --query value -o tsv
+
+# Azure DevOps のデフォルト設定を構成
+az devops configure --defaults organization=https://dev.azure.com/bell999 project=az400-handson3
+
+# 設定を確認
+az devops configure --list
+
+# リポジトリを作成
+$repoName = "az400-handson3-lab2-pipeline"
+az repos create --name $repoName
+
+# リポジトリのクローン URL を取得
+$repoUrl = az repos show --repository $repoName --query "remoteUrl" -o tsv
+Write-Host "Repository URL: $repoUrl"
+
+# リモートリポジトリを追加してプッシュ
+git remote add origin $repoUrl
+git add .
+git commit -m "Initial commit: .NET Web API"
+git push -u origin main
+```
+
+> **💡 ヒント**: 
+> - Key Vault 名は `kv-az400-{ユーザー名}` の形式で自動生成されます
+> - Lab 1 で既に Key Vault を作成済みの場合、Step 2 のKey Vault作成部分はスキップされます
+> - PAT は Key Vault に安全に保存され、必要な時に取得できます
+
+> **⚠️ 注意**: 
+> - `AZURE_DEVOPS_EXT_PAT` 環境変数が設定されていないと認証エラーが発生します
+> - PAT のスコープに「Code: Read, write, & manage」が含まれていることを確認してください
+> - PAT には有効期限があるため、期限切れの場合は再作成が必要です
+
+> **🔒 セキュリティのベストプラクティス**:
+> - PAT は必要最小限のスコープのみを許可
+> - Key Vault を使用して PAT を安全に保管
+> - 不要になった PAT は Azure DevOps から削除
+> - 定期的に PAT をローテーション（更新）
 
 ### Exercise 2: 基本的な YAML パイプラインの作成
 
@@ -591,6 +720,117 @@ git push origin feature/add-logging
 </details>
 
 ## 🔍 トラブルシューティング
+
+### .NET 10でプロジェクトが作成された場合のエラー
+
+**問題**: `dotnet new webapi` で .NET 10 プロジェクトが作成され、以下のエラーが発生する：
+- `AddOpenApi()` メソッドが見つからない
+- `MapOpenApi()` メソッドが見つからない
+- テストプロジェクトでビルドエラーが発生
+
+**解決方法**:
+
+1. **WebApp.csproj を .NET 8 に変更**:
+```xml
+<PropertyGroup>
+  <TargetFramework>net8.0</TargetFramework>
+  <!-- net10.0 から net8.0 に変更 -->
+</PropertyGroup>
+```
+
+2. **OpenApi関連のコードを削除** (Program.cs):
+```csharp
+// 削除: builder.Services.AddOpenApi();
+// 削除: app.MapOpenApi();
+```
+
+3. **OpenApiパッケージを削除**:
+```powershell
+dotnet remove WebApp\WebApp.csproj package Microsoft.AspNetCore.OpenApi
+```
+
+4. **WebApp.Tests.csproj も .NET 8 に変更**:
+```xml
+<PropertyGroup>
+  <TargetFramework>net8.0</TargetFramework>
+</PropertyGroup>
+```
+
+5. **クリーンビルド**:
+```powershell
+Remove-Item -Recurse -Force WebApp\obj, WebApp.Tests\obj
+dotnet clean
+dotnet build
+```
+
+### テストプロジェクトの配置エラー
+
+**問題**: テストプロジェクトが `WebApp\WebApp.Tests` に作成され、参照エラーが発生する。
+
+**解決方法**: テストプロジェクトはルートレベルに配置する：
+```
+az400-handson3-lab2/
+├── WebApp/              # Web APIプロジェクト
+│   └── WebApp.csproj
+└── WebApp.Tests/        # テストプロジェクト（ルートレベル）
+    └── WebApp.Tests.csproj
+```
+
+誤った場所に作成した場合：
+```powershell
+# 誤った場所のテストプロジェクトを削除
+Remove-Item -Recurse -Force WebApp\WebApp.Tests
+
+# ルートレベルに再作成
+dotnet new xunit -n WebApp.Tests
+dotnet add WebApp.Tests\WebApp.Tests.csproj reference WebApp\WebApp.csproj
+```
+
+### Azure DevOps CLI 認証エラー
+
+**問題**: `az repos create` などのコマンドで以下のエラーが発生する：
+```
+The requested resource requires user authentication: https://dev.azure.com/bell999/_apis
+```
+
+**原因**: Azure DevOps CLI に Personal Access Token (PAT) が設定されていない。
+
+**解決方法**:
+
+**方法1: 環境変数に直接設定（一時的）**
+```powershell
+# Azure DevOps PAT を環境変数に設定
+$env:AZURE_DEVOPS_EXT_PAT = "your-pat-token-here"
+
+# コマンドを実行
+az repos create --name $repoName
+```
+
+**方法2: Key Vault から取得（推奨）**
+```powershell
+# Key Vault から PAT を取得して環境変数に設定
+$kvName = "kv-az400-$($env:USERNAME)"
+$env:AZURE_DEVOPS_EXT_PAT = az keyvault secret show `
+  --vault-name $kvName `
+  --name "azure-devops-pat" `
+  --query value -o tsv
+
+# 環境変数が正しく設定されたことを確認
+if ($env:AZURE_DEVOPS_EXT_PAT) {
+    Write-Host "✅ PAT is set (length: $($env:AZURE_DEVOPS_EXT_PAT.Length))"
+} else {
+    Write-Host "❌ PAT is not set"
+}
+
+# コマンドを実行
+az repos create --name $repoName
+```
+
+**確認ポイント**:
+- ✅ PAT が Azure DevOps で作成されている
+- ✅ PAT のスコープに「Code: Read, write, & manage」が含まれている
+- ✅ PAT の有効期限が切れていない
+- ✅ `az devops configure --list` で組織とプロジェクトが設定されている
 
 ### キャッシュがヒットしない
 ```yaml
