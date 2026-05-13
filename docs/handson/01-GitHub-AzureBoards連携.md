@@ -653,12 +653,20 @@ Slack と Azure DevOps の統合には2つの方法があります。
 - ワークスペース作成は必ず Web から行う必要があります
 - 作成後は Slack アプリに自動的に同期されます
 
-**方法1: Slack Workspace から Azure DevOps アプリを追加（推奨）**
+**方法1: Slack Workspace から Azure DevOps アプリを追加**
+
+**⚠️ 注意（2026年5月時点）**: Slack App Directory で「Azure DevOps」アプリが見つからない場合があります。以下の順で試してください：
 
 1. **Slack Workspace** を開く
 2. 左サイドバーで **「アプリ」** をクリック
-3. **「アプリを検索」** で **「Azure DevOps」** を検索
-4. **「Azure DevOps」** アプリを選択して **「追加」** をクリック
+3. **「アプリを検索」** で以下の名称を順に検索：
+   - **「Azure DevOps」**
+   - **「Azure Pipelines」** (Azure DevOpsの機能の一部として提供されている場合)
+   - **「Azure Boards」**
+   - **「Microsoft Azure DevOps」**
+
+**アプリが見つかった場合：**
+4. アプリを選択して **「追加」** をクリック
 5. **「Azure DevOps に接続」** をクリック
 6. Azure DevOps へのサインインを求められるのでサインイン
 7. Organization と Project を承認
@@ -674,34 +682,130 @@ Slack と Azure DevOps の統合には2つの方法があります。
     - Builds completed
     など
 
-**方法2: Service Hooks で Slack を設定（従来の方法）**
+**❌ アプリが見つからない場合：**
+- **方法2（Service Hooks）** に進んでください（こちらの方が確実です）
 
-1. Slack Workspace で **Incoming Webhook** を設定：
-   - Slack → 「設定と管理」→「アプリを管理」
-   - 「Incoming Webhooks」を検索して追加
-   - チャネルを選択（例: `#azure-devops`）
-   - Webhook URL をコピー（例: `https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXX`）
+**方法2: Service Hooks で Slack を設定（確実な方法・推奨）**
 
-2. Azure DevOps で Service Hook を作成：
-   - Azure DevOps → Project Settings → Service hooks
-   - 「+ Create subscription」をクリック
-   - Service: **Slack** を選択
-   - Trigger: **Pull request created** を選択
-   - 「Next」をクリック
-   - Slack Webhook URL を貼り付け
-   - Message format を選択（推奨: **Detailed**）
-   - 「Finish」をクリック
+**✅ この方法は Azure DevOps アプリが見つからない場合でも動作します**
+
+**手順:**
+
+1. **Slack Workspace で Incoming Webhook を設定：**
+   
+   a. Slack Workspace を開く
+   
+   b. 左下の **「設定と管理」** → **「アプリを管理」** をクリック
+      - または、直接 `https://[your-workspace].slack.com/apps` にアクセス
+   
+   c. 検索ボックスで **「Incoming Webhooks」** を検索
+   
+   d. **「Incoming Webhooks」** を選択して **「Slack に追加」** をクリック
+   
+   e. 通知を受け取りたいチャネルを選択（例: `#azure-devops`）
+      - チャネルが存在しない場合は事前に作成してください
+   
+   f. **「Incoming Webhook インテグレーションの追加」** をクリック
+   
+   g. **Webhook URL** が表示されるのでコピー
+      ```
+      例: https://hooks.slack.com/services/T0B3FATDT34/B07XXXXXXXX/XXXXXXXXXXXXXXXXXXXX
+      ```
+   
+   h. （オプション）カスタマイズ:
+      - 名前を変更（例: `Azure DevOps Notifier`）
+      - アイコンを変更（Azure DevOps のロゴなど）
+      - 「設定を保存する」をクリック
+
+2. **Azure DevOps で Service Hook を作成：**
+   
+   a. Azure DevOps で対象プロジェクトを開く
+      ```
+      https://dev.azure.com/bell999/az400-handson3
+      ```
+   
+   b. 左下の **「Project Settings」** をクリック
+   
+   c. 左メニューの **「Service hooks」** をクリック
+   
+   d. **「+ Create subscription」** をクリック
+   
+   e. Service: **「Slack」** を選択 → **「Next」**
+   
+   f. Trigger を選択（例: **「Pull request created」**）
+      - 他のオプション:
+        - Pull request updated
+        - Pull request merge attempted
+        - Work item created
+        - Work item updated
+        - Build completed
+        - Release deployment started
+        など
+      
+      - Repository を指定する場合は選択
+      
+      - **「Next」** をクリック
+   
+   g. Action の設定:
+      - **Slack Webhook URL**: コピーした Webhook URL を貼り付け
+      - **Message format**: **「Detailed」** を選択（推奨）
+        - Compact: 簡潔な通知
+        - Detailed: 詳細な通知（PR の説明、変更内容など含む）
+      
+      - **「Test」** ボタンをクリックして Slack にテスト通知が届くか確認
+      
+      - **「Finish」** をクリック
+
+3. **複数のイベントを購読する場合：**
+   
+   同じ手順を繰り返して、異なる Trigger で複数の Service Hook を作成できます：
+   - Pull request created
+   - Pull request merged
+   - Work item created
+   - Work item state changed
+   - Build completed
+   など
 
 **💡 ポイント:**
-- **方法1**（Azure DevOps アプリ）の方が機能が豊富で双方向のコミュニケーションが可能
-- **方法2**（Incoming Webhook）はシンプルだが通知のみ（Azure DevOps への操作はできない）
-- Slack は無料プランでも Azure DevOps アプリを追加可能（Teamsの個人版と異なる）
+- **2026年5月時点**: Slack App Directory で「Azure DevOps」アプリが見つからない場合があります
+- **方法2（Service Hooks + Incoming Webhooks）** の方が確実で、すべてのケースで動作します
+- **方法1**（Azure DevOps アプリ）は機能が豊富で双方向のコミュニケーションが可能ですが、アプリの提供状況に依存します
+- **方法2**（Incoming Webhook）はシンプルで確実ですが、通知のみ（Azure DevOps への操作はできない）
+- Slack は無料プランでも Incoming Webhooks を利用可能
+- **AZ-400 試験対策としては方法2を理解していれば十分**
 
 **動作確認:**
 
 1. GitHub で新しい Pull Request を作成
 2. Slack チャネルに通知が届くことを確認
 3. 通知に PR のタイトル、作成者、リンクが含まれていることを確認
+
+**❗ トラブルシューティング（Slack 通知が届かない場合）:**
+
+1. **Webhook URL が正しいか確認：**
+   - Slack の Incoming Webhooks 設定画面で URL を再確認
+   - Azure DevOps の Service Hook 設定で URL が正しく貼り付けられているか確認
+
+2. **Service Hook のテスト：**
+   - Azure DevOps → Project Settings → Service hooks
+   - 作成した Slack への Service Hook を選択
+   - 「Test」ボタンをクリック
+   - Slack にテスト通知が届くか確認
+   - エラーが表示される場合はメッセージを確認
+
+3. **Trigger の条件を確認：**
+   - Repository が指定されている場合、対象のリポジトリで操作しているか確認
+   - Branch filter が設定されている場合、対象のブランチか確認
+
+4. **Slack チャネルのアクセス権限：**
+   - Incoming Webhook が追加されたチャネルにアクセスできるか確認
+   - プライベートチャネルの場合、自分が招待されているか確認
+
+5. **Service Hook の履歴を確認：**
+   - Azure DevOps → Project Settings → Service hooks
+   - 作成した Subscription を選択
+   - 「History」タブで実行履歴とエラーログを確認
+   - Status が「Failed」の場合、詳細をクリックしてエラー内容を確認
 
 ### Exercise 9: Pull Request のマージと確認
 
